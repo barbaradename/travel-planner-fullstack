@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { generateItinerary, saveItinerary, getToken } from "../services/api";
 import { useNavigate } from "react-router-dom";
+import { COUNTRIES } from "../data/countries";
 
 const INTERESTS = ["food", "culture", "nature", "nightlife", "relax"];
 
 export default function Home() {
   const navigate = useNavigate();
 
-  // deixa "logado" reativo (se fizer login em outra tela, aqui atualiza)
   const [token, setTokenState] = useState(getToken());
   useEffect(() => {
     const onStorage = () => setTokenState(getToken());
     window.addEventListener("storage", onStorage);
-    // fallback: quando volta pra aba, atualiza
     window.addEventListener("focus", onStorage);
     return () => {
       window.removeEventListener("storage", onStorage);
@@ -22,7 +21,10 @@ export default function Home() {
 
   const isLogged = useMemo(() => Boolean(token), [token]);
 
+  // Destination
+  const [country, setCountry] = useState("Spain");
   const [city, setCity] = useState("Barcelona");
+
   const [days, setDays] = useState(3);
   const [budget, setBudget] = useState("any");
   const [interests, setInterests] = useState(["food", "culture"]);
@@ -38,6 +40,16 @@ export default function Home() {
     );
   }
 
+  function getDestinationString() {
+    const trimmedCity = String(city || "").trim();
+    const trimmedCountry = String(country || "").trim();
+
+    if (trimmedCity && trimmedCountry)
+      return `${trimmedCity}, ${trimmedCountry}`;
+    if (trimmedCountry) return trimmedCountry;
+    return trimmedCity || "Unknown";
+  }
+
   async function handleGenerate() {
     setError("");
 
@@ -49,7 +61,7 @@ export default function Home() {
     setLoadingGen(true);
     try {
       const data = await generateItinerary({
-        city,
+        city: getDestinationString(),
         days: Number(days),
         budget,
         interests,
@@ -73,15 +85,13 @@ export default function Home() {
 
     setLoadingSave(true);
     try {
-      const data = await saveItinerary({
-        city,
+      await saveItinerary({
+        city: getDestinationString(),
         days: Number(days),
         budget,
         interests,
         plan,
       });
-
-      const newId = data?.itinerary?._id || data?.itinerary?.id;
 
       navigate("/my-trips");
     } catch (err) {
@@ -103,8 +113,23 @@ export default function Home() {
 
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
         <label>
-          City
-          <input value={city} onChange={(e) => setCity(e.target.value)} />
+          Country
+          <select value={country} onChange={(e) => setCountry(e.target.value)}>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          City (optional)
+          <input
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            placeholder="e.g. Barcelona"
+          />
         </label>
 
         <label>
@@ -127,7 +152,7 @@ export default function Home() {
           </select>
         </label>
 
-        <div>
+        <div style={{ gridColumn: "1 / -1" }}>
           <div>Interests</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {INTERESTS.map((tag) => (
@@ -179,9 +204,24 @@ export default function Home() {
               }}
             >
               <b>Day {d.day}</b>
-              <div>Morning: {d.morning?.title || "—"}</div>
-              <div>Afternoon: {d.afternoon?.title || "—"}</div>
-              <div>Evening: {d.evening?.title || "—"}</div>
+              <div>
+                Morning: {d.morning?.title || "—"}
+                {d.morning?.tip ? (
+                  <div style={{ color: "#666" }}>Tip: {d.morning.tip}</div>
+                ) : null}
+              </div>
+              <div>
+                Afternoon: {d.afternoon?.title || "—"}
+                {d.afternoon?.tip ? (
+                  <div style={{ color: "#666" }}>Tip: {d.afternoon.tip}</div>
+                ) : null}
+              </div>
+              <div>
+                Evening: {d.evening?.title || "—"}
+                {d.evening?.tip ? (
+                  <div style={{ color: "#666" }}>Tip: {d.evening.tip}</div>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>

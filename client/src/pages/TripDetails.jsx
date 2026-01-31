@@ -1,27 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getItinerary, deleteItinerary, getToken } from "../services/api";
+import { getItinerary } from "../services/api";
 
 export default function TripDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
 
   const [trip, setTrip] = useState(null);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     async function load() {
-      setError("");
-
-      if (!getToken()) {
-        navigate("/login");
-        return;
-      }
-
       try {
         const data = await getItinerary(id);
-        setTrip(data.itinerary);
+        setTrip(data.itinerary || data);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -30,22 +23,18 @@ export default function TripDetails() {
     }
 
     load();
-  }, [id, navigate]);
-
-  async function handleDelete() {
-    const ok = window.confirm("Delete this trip? This cannot be undone.");
-    if (!ok) return;
-
-    setError("");
-    try {
-      await deleteItinerary(id);
-      navigate("/my-trips");
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+  }, [id]);
 
   if (loading) return <div style={{ padding: 16 }}>Loading...</div>;
+
+  if (error) {
+    return (
+      <div style={{ padding: 16 }}>
+        <p style={{ color: "crimson" }}>{error}</p>
+        <button onClick={() => navigate("/my-trips")}>Back</button>
+      </div>
+    );
+  }
 
   if (!trip) {
     return (
@@ -58,53 +47,49 @@ export default function TripDetails() {
 
   return (
     <div style={{ padding: 16, maxWidth: 900 }}>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: 10 }}
-      >
-        <div>
-          <h2 style={{ margin: 0 }}>{trip.city}</h2>
-          <p style={{ margin: "6px 0", color: "#666" }}>
-            {trip.days} days {trip.budget ? `• Budget: ${trip.budget}` : ""}
-          </p>
-          {Array.isArray(trip.interests) && trip.interests.length > 0 && (
-            <p style={{ margin: 0, color: "#666" }}>
-              Interests: {trip.interests.join(", ")}
-            </p>
-          )}
+      <button onClick={() => navigate("/my-trips")}>← Back to My Trips</button>
+
+      <h2 style={{ marginTop: 12 }}>
+        {trip.city} — {trip.days} days
+      </h2>
+
+      {trip.budget && (
+        <div style={{ color: "#666" }}>Budget: {trip.budget}</div>
+      )}
+
+      {Array.isArray(trip.interests) && trip.interests.length > 0 && (
+        <div style={{ color: "#666" }}>
+          Interests: {trip.interests.join(", ")}
         </div>
+      )}
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={() => navigate("/my-trips")}>Back</button>
-          <button onClick={handleDelete}>Delete</button>
-        </div>
-      </div>
+      <h3 style={{ marginTop: 20 }}>Itinerary</h3>
 
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {Array.isArray(trip.itinerary) && trip.itinerary.length > 0 ? (
+        trip.itinerary.map((day, index) => (
+          <div
+            key={index}
+            style={{
+              border: "1px solid #ddd",
+              borderRadius: 10,
+              padding: 12,
+              marginBottom: 12,
+            }}
+          >
+            <strong>Day {index + 1}</strong>
 
-      <div style={{ marginTop: 16 }}>
-        <h3>Itinerary</h3>
-
-        {Array.isArray(trip.plan) && trip.plan.length > 0 ? (
-          trip.plan.map((d) => (
-            <div
-              key={d.day}
-              style={{
-                border: "1px solid #ddd",
-                padding: 12,
-                borderRadius: 10,
-                marginBottom: 10,
-              }}
-            >
-              <b>Day {d.day}</b>
-              <div>Morning: {d.morning?.title || "—"}</div>
-              <div>Afternoon: {d.afternoon?.title || "—"}</div>
-              <div>Evening: {d.evening?.title || "—"}</div>
-            </div>
-          ))
-        ) : (
-          <p style={{ color: "#666" }}>No plan saved.</p>
-        )}
-      </div>
+            {Array.isArray(day.activities) && (
+              <ul style={{ marginTop: 8 }}>
+                {day.activities.map((activity, i) => (
+                  <li key={i}>{activity}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))
+      ) : (
+        <p>No itinerary details available.</p>
+      )}
     </div>
   );
 }

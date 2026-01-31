@@ -9,12 +9,54 @@ router.post("/generate", requireAuth, async (req, res) => {
     const { city, days, budget, interests } = req.body;
 
     const activities = [
-      { title: "City walking tour", tags: ["culture", "food"], price: "low" },
-      { title: "Museum morning", tags: ["culture"], price: "medium" },
-      { title: "Local market + tapas", tags: ["food"], price: "low" },
-      { title: "Beach afternoon", tags: ["nature", "relax"], price: "low" },
-      { title: "Nightlife area", tags: ["nightlife"], price: "medium" },
-      { title: "Hike viewpoint", tags: ["nature"], price: "low" },
+      {
+        title: "City walking tour",
+        tags: ["culture", "food"],
+        price: "low",
+        tip: "Start early to avoid crowds.",
+      },
+      {
+        title: "Museum morning",
+        tags: ["culture"],
+        price: "medium",
+        tip: "Check if you need timed tickets.",
+      },
+      {
+        title: "Local market + tapas",
+        tags: ["food"],
+        price: "low",
+        tip: "Go hungry and try small portions.",
+      },
+      {
+        title: "Beach afternoon",
+        tags: ["nature", "relax"],
+        price: "low",
+        tip: "Bring sunscreen + water.",
+      },
+      {
+        title: "Nightlife area",
+        tags: ["nightlife"],
+        price: "medium",
+        tip: "Use public transport at night if possible.",
+      },
+      {
+        title: "Hike viewpoint",
+        tags: ["nature"],
+        price: "low",
+        tip: "Wear comfy shoes and check the weather.",
+      },
+      {
+        title: "Coffee + neighborhood stroll",
+        tags: ["relax", "culture"],
+        price: "low",
+        tip: "Pick a neighborhood and explore slowly.",
+      },
+      {
+        title: "Food tour / tasting menu",
+        tags: ["food"],
+        price: "medium",
+        tip: "Reserve in advance for popular spots.",
+      },
     ];
 
     const filtered = activities.filter((a) => {
@@ -24,13 +66,20 @@ router.post("/generate", requireAuth, async (req, res) => {
       return matchInterest && matchBudget;
     });
 
-    const numDays = Number(days || 3);
+    const pool = filtered.length ? filtered : activities;
+
+    function pick(indexOffset) {
+      return pool.length ? pool[indexOffset % pool.length] : null;
+    }
+
+    const numDays = Math.max(1, Number(days || 3));
 
     const plan = Array.from({ length: numDays }, (_, i) => ({
       day: i + 1,
-      morning: filtered[0] || null,
-      afternoon: filtered[1] || null,
-      evening: filtered[2] || null,
+      morning: pick(i * 3),
+      afternoon: pick(i * 3 + 1),
+      evening: pick(i * 3 + 2),
+      city,
     }));
 
     res.json({ ok: true, plan });

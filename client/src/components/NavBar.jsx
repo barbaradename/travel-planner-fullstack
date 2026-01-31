@@ -1,12 +1,14 @@
 import { Link, useNavigate } from "react-router-dom";
 import { clearToken, getToken } from "../services/api";
+import { useState } from "react";
 
 export default function NavBar() {
   const navigate = useNavigate();
-  const isLogged = Boolean(getToken());
+  const [isLogged, setIsLogged] = useState(Boolean(getToken()));
 
   function handleLogout() {
     clearToken();
+    setIsLogged(false);
     navigate("/login");
   }
 
