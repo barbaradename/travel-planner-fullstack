@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://SEU-BACKEND.onrender.com/api/$1"
+    }
+  ]
+}
