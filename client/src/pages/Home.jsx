@@ -1,113 +1,203 @@
-import { useEffect, useMemo, useState } from "react";
-import { generateItinerary, saveItinerary, getToken } from "../services/api";
-import { useLocation, useNavigate } from "react-router-dom";
-import { COUNTRIES } from "../data/countries";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import auroraImg from "../assets/aurora.jpeg";
+import { DESTINATIONS } from "../data/destinations";
+import { getToken, saveItinerary } from "../services/api";
 
-const INTERESTS = ["food", "culture", "nature", "nightlife", "relax"];
+const CLIMATE = [
+  { value: "cold", label: "Cold ❄️" },
+  { value: "mild", label: "Mild 🌤️" },
+  { value: "warm", label: "Warm ☀️" },
+];
+
+const VIBE = [
+  { value: "nature", label: "Nature" },
+  { value: "city", label: "City" },
+  { value: "culture", label: "Culture" },
+];
+
+const LANDSCAPE = [
+  { value: "beach", label: "Beach" },
+  { value: "mountains", label: "Mountains" },
+  { value: "countryside", label: "Countryside" },
+  { value: "waterfalls", label: "Waterfalls" },
+];
+
+const TIME = [
+  { value: "day", label: "Day person 🌞" },
+  { value: "night", label: "Night person 🌙" },
+];
+
+const BUDGET = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "any", label: "Any" },
+];
+
+function buildPlaceholderPlan(countryName) {
+  return [
+    {
+      day: 1,
+      morning: {
+        title: `Explore the highlights of ${countryName}`,
+        tip: "Start in the most popular area.",
+      },
+      afternoon: {
+        title: "Local food + culture",
+        tip: "Try a traditional dish and visit a landmark.",
+      },
+      evening: {
+        title: "Sunset / night vibe",
+        tip: "Find a viewpoint or a lively neighborhood.",
+      },
+    },
+    {
+      day: 2,
+      morning: {
+        title: "Nature or landscape day",
+        tip: "Pick a scenic spot based on your preferences.",
+      },
+      afternoon: {
+        title: "Must-see attraction",
+        tip: "Book tickets if needed.",
+      },
+      evening: {
+        title: "Relax",
+        tip: "Keep the evening flexible.",
+      },
+    },
+    {
+      day: 3,
+      morning: {
+        title: "Hidden gems",
+        tip: "Explore smaller streets and local cafés.",
+      },
+      afternoon: {
+        title: "Shopping / souvenirs",
+        tip: "Support local crafts.",
+      },
+      evening: {
+        title: "Final dinner",
+        tip: "Choose a signature restaurant.",
+      },
+    },
+  ];
+}
+
+function scoreDestination(dest, answers) {
+  const tags = dest.tags || {};
+  const match = (arr, value) => Array.isArray(arr) && arr.includes(value);
+
+  let score = 0;
+
+  // Strong matches
+  if (match(tags.climate, answers.climate)) score += 5;
+  if (match(tags.landscape, answers.landscape)) score += 5;
+  if (match(tags.vibe, answers.vibe)) score += 4;
+
+  // Soft matches
+  if (match(tags.time, answers.time)) score += 2;
+  if (answers.budget === "any" || match(tags.budget, answers.budget))
+    score += 1;
+
+  // Penalty for opposite climate (prevents Sweden when you pick warm)
+  const oppositeClimate = { warm: "cold", cold: "warm" };
+  if (
+    oppositeClimate[answers.climate] &&
+    match(tags.climate, oppositeClimate[answers.climate])
+  ) {
+    score -= 6;
+  }
+
+  // Penalize destinations with too few tags (avoid random picks)
+  const tagsCount =
+    (tags.climate?.length || 0) +
+    (tags.vibe?.length || 0) +
+    (tags.landscape?.length || 0);
+
+  if (tagsCount < 2) score -= 3;
+
+  return score;
+}
 
 export default function Home() {
   const navigate = useNavigate();
-  const location = useLocation();
+  const isLogged = Boolean(getToken());
 
-  const [token, setTokenState] = useState(getToken());
-  useEffect(() => {
-    const onStorage = () => setTokenState(getToken());
-    window.addEventListener("storage", onStorage);
-    window.addEventListener("focus", onStorage);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", onStorage);
-    };
-  }, []);
+  const [answers, setAnswers] = useState({
+    age: "",
+    climate: "mild",
+    vibe: "culture",
+    landscape: "beach",
+    time: "day",
+    budget: "any",
+  });
 
-  useEffect(() => {
-    if (location.hash) {
-      const id = location.hash.replace("#", "");
-      const el = document.getElementById(id);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [location.hash]);
-
-  const isLogged = useMemo(() => Boolean(token), [token]);
-
-  const [country, setCountry] = useState("Spain");
-  const [city, setCity] = useState("Barcelona");
-  const [days, setDays] = useState(3);
-  const [budget, setBudget] = useState("any");
-  const [interests, setInterests] = useState(["food", "culture"]);
-
-  const [plan, setPlan] = useState(null);
+  const [results, setResults] = useState([]);
   const [error, setError] = useState("");
-  const [loadingGen, setLoadingGen] = useState(false);
-  const [loadingSave, setLoadingSave] = useState(false);
+  const [savingSlug, setSavingSlug] = useState("");
 
-  function toggleInterest(tag) {
-    setInterests((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
-    );
+  const top3 = useMemo(() => results.slice(0, 3), [results]);
+
+  function handleChange(key, value) {
+    setAnswers((prev) => ({ ...prev, [key]: value }));
   }
 
-  function destination() {
-    const c = String(country || "").trim();
-    const ci = String(city || "").trim();
-    if (ci && c) return `${ci}, ${c}`;
-    return c || ci || "Unknown";
-  }
-
-  async function handleGenerate() {
+  function handleFind() {
     setError("");
+
+    const ranked = DESTINATIONS.map((d) => ({
+      ...d,
+      _score: scoreDestination(d, answers),
+    })).sort((a, b) => b._score - a._score);
+
+    setResults(ranked);
+  }
+
+  async function handleSave(dest) {
+    setError("");
+
     if (!isLogged) {
       navigate("/login");
       return;
     }
-    setLoadingGen(true);
-    try {
-      const data = await generateItinerary({
-        city: destination(),
-        days: Number(days),
-        budget,
-        interests,
-      });
-      setPlan(data.plan);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoadingGen(false);
-    }
-  }
 
-  async function handleSave() {
-    setError("");
-    if (!plan) return;
-    if (!isLogged) {
-      navigate("/login");
-      return;
-    }
-    setLoadingSave(true);
+    setSavingSlug(dest.slug);
+
     try {
+      const planToSave =
+        Array.isArray(dest.plan) && dest.plan.length > 0
+          ? dest.plan
+          : buildPlaceholderPlan(dest.name);
+
       await saveItinerary({
-        city: destination(),
-        days: Number(days),
-        budget,
-        interests,
-        plan,
+        city: dest.name, // using "city" field as country name for now
+        days: planToSave.length,
+        budget: answers.budget,
+        interests: [
+          answers.vibe,
+          answers.landscape,
+          answers.climate,
+          answers.time,
+        ].filter(Boolean),
+        plan: planToSave,
       });
+
       navigate("/my-trips");
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoadingSave(false);
+      setSavingSlug("");
     }
   }
 
   return (
     <div>
-      {/* HERO FULL WIDTH */}
+      {/* HERO */}
       <section
         style={{
           width: "100%",
-          minHeight: "80vh",
+          minHeight: "70vh",
           backgroundImage: `linear-gradient(to bottom, rgba(7,10,18,0.15), rgba(7,10,18,0.92)), url(${auroraImg})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
@@ -165,18 +255,18 @@ export default function Home() {
                     Create your account
                   </button>
                   <button className="btn" onClick={() => navigate("/login")}>
-                    Already have an account?
+                    Login
                   </button>
                 </>
               ) : (
                 <button
                   className="btn btnPrimary"
                   onClick={() => {
-                    const el = document.getElementById("planner");
+                    const el = document.getElementById("quiz");
                     if (el) el.scrollIntoView({ behavior: "smooth" });
                   }}
                 >
-                  Start planning
+                  Start the quiz
                 </button>
               )}
             </div>
@@ -184,114 +274,98 @@ export default function Home() {
         </div>
       </section>
 
-      {/* TOURS (band style like the example) */}
-      <section id="tours" className="band">
-        <div className="container" style={{ textAlign: "center" }}>
-          <h2 className="sectionTitle">TOURS</h2>
-          <p className="sectionText">
-            Explore curated experiences — from aurora chasing and fjords to city
-            food tours and cultural walks.
-          </p>
-        </div>
-      </section>
-
-      {/* HOW IT WORKS */}
-      <section id="how" className="bandAlt">
-        <div className="container" style={{ textAlign: "center" }}>
-          <h2 className="sectionTitle">HOW IT WORKS</h2>
-          <p className="sectionText">
-            Pick a destination, choose your days and interests, generate an
-            itinerary and save it to My Trips.
-          </p>
-        </div>
-      </section>
-
-      {/* PLANNER (still clean, but not “card blocks”) */}
-      <section id="planner" className="band">
+      {/* QUIZ */}
+      <section id="quiz" className="band">
         <div className="container">
           <div style={{ textAlign: "center" }}>
-            <h2 className="sectionTitle">TRAVEL PLANNER</h2>
+            <h2 className="sectionTitle">FIND YOUR DESTINATION</h2>
             <p className="sectionText">
-              Choose your destination and preferences below.
-              {!isLogged ? " Login to generate and save your trips." : ""}
+              Choose your preferences and we’ll suggest the best match.
             </p>
           </div>
 
-          <div className="plannerGrid">
+          <div className="plannerGrid" style={{ marginTop: 26 }}>
             <label>
-              Country
-              <select
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-              >
-                {COUNTRIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              City (optional)
+              Age (optional)
               <input
                 className="input"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="e.g. Tromsø"
-              />
-            </label>
-
-            <label>
-              Days
-              <input
-                className="input"
-                value={days}
-                onChange={(e) => setDays(e.target.value)}
+                value={answers.age}
+                onChange={(e) => handleChange("age", e.target.value)}
+                placeholder="e.g. 29"
                 type="number"
-                min="1"
-                max="14"
+                min="0"
               />
             </label>
 
             <label>
               Budget
               <select
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
+                value={answers.budget}
+                onChange={(e) => handleChange("budget", e.target.value)}
               >
-                <option value="any">Any</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
+                {BUDGET.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {x.label}
+                  </option>
+                ))}
               </select>
             </label>
 
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ marginBottom: 8, color: "rgba(255,255,255,0.75)" }}>
-                Interests
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {INTERESTS.map((tag) => (
-                  <button
-                    type="button"
-                    key={tag}
-                    onClick={() => toggleInterest(tag)}
-                    className="btn"
-                    style={{
-                      borderRadius: 999,
-                      background: interests.includes(tag)
-                        ? "rgba(125,211,252,0.18)"
-                        : "rgba(255,255,255,0.08)",
-                      borderColor: interests.includes(tag)
-                        ? "rgba(125,211,252,0.35)"
-                        : "rgba(255,255,255,0.12)",
-                    }}
-                  >
-                    {tag}
-                  </button>
+            <label>
+              Climate
+              <select
+                value={answers.climate}
+                onChange={(e) => handleChange("climate", e.target.value)}
+              >
+                {CLIMATE.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {x.label}
+                  </option>
                 ))}
-              </div>
-            </div>
+              </select>
+            </label>
+
+            <label>
+              Vibe
+              <select
+                value={answers.vibe}
+                onChange={(e) => handleChange("vibe", e.target.value)}
+              >
+                {VIBE.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Landscape
+              <select
+                value={answers.landscape}
+                onChange={(e) => handleChange("landscape", e.target.value)}
+              >
+                {LANDSCAPE.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Day or night
+              <select
+                value={answers.time}
+                onChange={(e) => handleChange("time", e.target.value)}
+              >
+                {TIME.map((x) => (
+                  <option key={x.value} value={x.value}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <div
               style={{
@@ -301,103 +375,167 @@ export default function Home() {
                 flexWrap: "wrap",
               }}
             >
-              <button
-                className="btn btnPrimary"
-                onClick={handleGenerate}
-                disabled={loadingGen || !isLogged}
-              >
-                {loadingGen ? "Generating..." : "Generate Itinerary"}
+              <button className="btn btnPrimary" onClick={handleFind}>
+                Find my destination
               </button>
-
-              <button
-                className="btn"
-                onClick={handleSave}
-                disabled={!plan || loadingSave || !isLogged}
-              >
-                {loadingSave ? "Saving..." : "Save Trip"}
-              </button>
-
-              {error ? <span style={{ color: "#fb7185" }}>{error}</span> : null}
+              {error && <span style={{ color: "#fb7185" }}>{error}</span>}
             </div>
           </div>
 
-          {/* ITINERARY (clean, like a section) */}
-          {plan && (
+          {/* RESULTS */}
+          {top3.length > 0 && (
             <div style={{ marginTop: 34 }}>
               <div style={{ textAlign: "center" }}>
-                <h2 className="sectionTitle">ITINERARY</h2>
+                <h2 className="sectionTitle">TOP MATCHES</h2>
                 <p className="sectionText">
-                  Here is your generated plan for {destination()}.
+                  Explore a country or save it to My Trips.
                 </p>
               </div>
 
-              <div style={{ display: "grid", gap: 14, marginTop: 22 }}>
-                {plan.map((d) => (
-                  <div
-                    key={d.day}
-                    style={{
-                      padding: 18,
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      borderRadius: 16,
-                      background: "rgba(0,0,0,0.22)",
-                    }}
-                  >
-                    <div style={{ fontWeight: 800, marginBottom: 10 }}>
-                      DAY {d.day}
-                    </div>
+              <div
+                style={{
+                  marginTop: 18,
+                  display: "grid",
+                  gap: 14,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                }}
+              >
+                {top3.map((d) => {
+                  const previewPlan =
+                    Array.isArray(d.plan) && d.plan.length > 0
+                      ? d.plan
+                      : buildPlaceholderPlan(d.name);
 
+                  const day1 = previewPlan[0];
+
+                  return (
                     <div
+                      key={d.slug}
                       style={{
-                        color: "rgba(255,255,255,0.78)",
-                        lineHeight: 1.6,
+                        padding: 16,
+                        borderRadius: 16,
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        background: "rgba(0,0,0,0.22)",
+                        display: "grid",
+                        gap: 10,
                       }}
                     >
-                      <div style={{ marginBottom: 8 }}>
-                        <b>Morning:</b> {d.morning?.title || "—"}
-                        {d.morning?.tip ? (
-                          <div style={{ color: "rgba(255,255,255,0.60)" }}>
-                            Tip: {d.morning.tip}
-                          </div>
-                        ) : null}
+                      <div style={{ fontWeight: 900, fontSize: 18 }}>
+                        {d.name}
                       </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <b>Afternoon:</b> {d.afternoon?.title || "—"}
-                        {d.afternoon?.tip ? (
-                          <div style={{ color: "rgba(255,255,255,0.60)" }}>
-                            Tip: {d.afternoon.tip}
-                          </div>
-                        ) : null}
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.70)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {d.tagline}
                       </div>
-                      <div>
-                        <b>Evening:</b> {d.evening?.title || "—"}
-                        {d.evening?.tip ? (
-                          <div style={{ color: "rgba(255,255,255,0.60)" }}>
-                            Tip: {d.evening.tip}
-                          </div>
-                        ) : null}
+
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.75)",
+                          fontSize: 14,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        <b>Mini itinerary (Day 1):</b>
+                        <div>Morning: {day1?.morning?.title || "—"}</div>
+                        <div>Afternoon: {day1?.afternoon?.title || "—"}</div>
+                        <div>Evening: {day1?.evening?.title || "—"}</div>
+                      </div>
+
+                      <div
+                        style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+                      >
+                        <Link className="btn" to={`/destinations/${d.slug}`}>
+                          View
+                        </Link>
+
+                        <button
+                          className="btn btnPrimary"
+                          onClick={() => handleSave(d)}
+                          disabled={savingSlug === d.slug}
+                        >
+                          {savingSlug === d.slug ? "Saving..." : "Save"}
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </section>
 
-      {/* ABOUT */}
-      <section id="about" className="bandAlt">
-        <div className="container" style={{ textAlign: "center" }}>
-          <h2 className="sectionTitle">ABOUT</h2>
-          <p className="sectionText">
-            Travel Planner is a MERN app built for the Barcelona Code School
-            Bootcamp — with authentication, protected routes, MongoDB Atlas and
-            CRUD for saved itineraries.
-          </p>
+      {/* HOW IT WORKS */}
+      <section id="how" className="bandAlt">
+        <div className="container">
+          <div style={{ textAlign: "center" }}>
+            <h2 className="sectionTitle">HOW IT WORKS</h2>
+            <p
+              className="sectionText"
+              style={{ maxWidth: 760, margin: "0 auto" }}
+            >
+              1) Answer a few questions • 2) Get your top matches • 3) View tips
+              and a mini itinerary • 4) Save your favorite to My Trips.
+            </p>
+          </div>
+
+          <div
+            style={{
+              marginTop: 22,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 14,
+            }}
+          >
+            <div className="glassCard">
+              <b>Personalized match</b>
+              <div className="muted" style={{ marginTop: 8 }}>
+                We rank destinations based on climate, vibe and landscape
+                preferences.
+              </div>
+            </div>
+
+            <div className="glassCard">
+              <b>Mini itinerary</b>
+              <div className="muted" style={{ marginTop: 8 }}>
+                Each destination shows a small plan preview to inspire your
+                trip.
+              </div>
+            </div>
+
+            <div className="glassCard">
+              <b>Save to My Trips</b>
+              <div className="muted" style={{ marginTop: 8 }}>
+                Save your favorite destination and keep it in your personal
+                list.
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* ABOUT */}
+      <section id="about" className="band">
+        <div className="container">
+          <div style={{ textAlign: "center" }}>
+            <h2 className="sectionTitle">ABOUT</h2>
+            <p
+              className="sectionText"
+              style={{ maxWidth: 780, margin: "0 auto" }}
+            >
+              Travel Planner is a full-stack MERN project with authentication,
+              protected routes and a personal saved trips list. The destination
+              quiz helps users find a country that fits their preferences and
+              provides a mini itinerary with tips.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <footer
         style={{
           padding: "26px 18px",
